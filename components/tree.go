@@ -77,6 +77,10 @@ func (tree *Tree) GetTreeNodeData(node *tview.TreeNode) *TreeNodeData {
 	switch {
 	case len(split) == 1:
 		nodeType = NodeTypeDatabase
+	case len(split) == 2 && useSchemas:
+		// Schema header: [database, schema]
+		schema = split[1]
+		nodeType = NodeTypeSection
 	case len(split) == 2 && !useSchemas && !supportsProgramming:
 		nodeType = NodeTypeTable
 	case len(split) == 3 && useSchemas && !supportsProgramming:
@@ -370,9 +374,10 @@ func (tree *Tree) databasesToNodes(children map[string][]string, node *tview.Tre
 		nodeReference := node.GetReference().(string)
 
 		if key != nodeReference {
+			schemaRef := fmt.Sprintf("%s.%s", nodeReference, key)
 			rootNode = tview.NewTreeNode(key)
 			rootNode.SetExpanded(false)
-			rootNode.SetReference(key)
+			rootNode.SetReference(schemaRef)
 			rootNode.SetColor(app.Styles.PrimaryTextColor)
 			node.AddChild(rootNode)
 			tablesContainer = rootNode
@@ -387,7 +392,7 @@ func (tree *Tree) databasesToNodes(children map[string][]string, node *tview.Tre
 			tablesNode.SetColor(app.Styles.PrimaryTextColor)
 
 			if rootNode != nil {
-				tablesNode.SetReference(fmt.Sprintf("%s.tables", key))
+				tablesNode.SetReference(fmt.Sprintf("%s.tables", rootNode.GetReference().(string)))
 				rootNode.AddChild(tablesNode)
 			} else {
 				tablesNode.SetReference(fmt.Sprintf("%s.tables", nodeReference))
@@ -469,7 +474,7 @@ func (tree *Tree) buildSchemaTree(database string, node *tview.TreeNode, tables,
 
 		schemaNode := tview.NewTreeNode(schema)
 		schemaNode.SetExpanded(false)
-		schemaNode.SetReference(schema)
+		schemaNode.SetReference(fmt.Sprintf("%s.%s", database, schema))
 		schemaNode.SetColor(app.Styles.PrimaryTextColor)
 		node.AddChild(schemaNode)
 
@@ -480,7 +485,7 @@ func (tree *Tree) buildSchemaTree(database string, node *tview.TreeNode, tables,
 		if supportsProgramming {
 			tablesNode := tview.NewTreeNode("tables")
 			tablesNode.SetExpanded(false)
-			tablesNode.SetReference(fmt.Sprintf("%s.tables", schema))
+			tablesNode.SetReference(fmt.Sprintf("%s.%s.tables", database, schema))
 			tablesNode.SetColor(app.Styles.PrimaryTextColor)
 			schemaNode.AddChild(tablesNode)
 
@@ -581,7 +586,7 @@ func (tree *Tree) addSchemaProgrammingNodes(node *tview.TreeNode, database strin
 		if schemaNode == nil {
 			schemaNode = tview.NewTreeNode(schema)
 			schemaNode.SetExpanded(false)
-			schemaNode.SetReference(schema)
+			schemaNode.SetReference(fmt.Sprintf("%s.%s", database, schema))
 			schemaNode.SetColor(app.Styles.PrimaryTextColor)
 			node.AddChild(schemaNode)
 		}

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"github.com/jorgerojas26/lazysql/drivers"
@@ -1425,4 +1426,114 @@ func TestSearch_SinglePartExactMatchDoesNotCollapseSiblings(t *testing.T) {
 
 func (m *schemaProgrammingMock) GetReferencingTables(context.Context, string, string) ([][]string, error) {
 	return nil, nil
+}
+
+type schemaTablesOnlyMock struct {
+	schemaProgrammingMock
+}
+
+func (m *schemaTablesOnlyMock) SupportsProgramming() bool { return false }
+
+func TestGetTreeNodeDataSchemaNodeIsSection(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		driver drivers.Driver
+	}{
+		{name: "schemas with programming", driver: &schemaProgrammingMock{}},
+		{name: "schemas without programming", driver: &schemaTablesOnlyMock{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tree := &Tree{DBDriver: tc.driver}
+			node := tview.NewTreeNode("deposit")
+			node.SetReference("mydb.deposit")
+
+			data := tree.GetTreeNodeData(node)
+			if data.Type != NodeTypeSection {
+				t.Fatalf("Type = %v, want NodeTypeSection (%v)", data.Type, NodeTypeSection)
+			}
+			if data.Database != "mydb" {
+				t.Fatalf("Database = %q, want %q", data.Database, "mydb")
+			}
+			if data.Schema != "deposit" {
+				t.Fatalf("Schema = %q, want %q", data.Schema, "deposit")
+			}
+			if data.Name != "deposit" {
+				t.Fatalf("Name = %q, want %q", data.Name, "deposit")
+			}
+		})
+	}
+}
+
+func TestBuildSchemaTreeAndTablesTreeQualifySchemaReferences(t *testing.T) {
+	t.Run("buildSchemaTree", func(t *testing.T) {
+		tree := &Tree{DBDriver: &schemaProgrammingMock{}}
+		dbNode := tview.NewTreeNode("mydb")
+		dbNode.SetReference("mydb")
+
+		tree.buildSchemaTree("mydb", dbNode, map[string][]string{"deposit": {"orders"}}, nil, nil, nil)
+
+		schemaNode := dbNode.GetChildren()[0]
+		if got := schemaNode.GetReference().(string); got != "mydb.deposit" {
+			t.Fatalf("schema reference = %q, want %q", got, "mydb.deposit")
+		}
+		tablesNode := schemaNode.GetChildren()[0]
+		if got := tablesNode.GetReference().(string); got != "mydb.deposit.tables" {
+			t.Fatalf("tables reference = %q, want %q", got, "mydb.deposit.tables")
+		}
+	})
+
+	t.Run("addTableNodes via buildTablesTree", func(t *testing.T) {
+		tree := &Tree{DBDriver: &schemaProgrammingMock{}}
+		dbNode := tview.NewTreeNode("mydb")
+		dbNode.SetReference("mydb")
+
+		tree.addTableNodes("mydb", dbNode, map[string][]string{"deposit": {"orders"}})
+
+		schemaNode := dbNode.GetChildren()[0]
+		if got := schemaNode.GetReference().(string); got != "mydb.deposit" {
+			t.Fatalf("schema reference = %q, want %q", got, "mydb.deposit")
+		}
+		tablesNode := schemaNode.GetChildren()[0]
+		if got := tablesNode.GetReference().(string); got != "mydb.deposit.tables" {
+			t.Fatalf("tables reference = %q, want %q", got, "mydb.deposit.tables")
+		}
+	})
+
+	t.Run("addSchemaProgrammingNodes", func(t *testing.T) {
+		tree := &Tree{DBDriver: &schemaProgrammingMock{}}
+		dbNode := tview.NewTreeNode("mydb")
+		dbNode.SetReference("mydb")
+
+		tree.addSchemaProgrammingNodes(dbNode, "mydb", map[string][]string{"mydb": {"api.health"}}, nil, nil)
+
+		schemaNode := dbNode.GetChildren()[0]
+		if got := schemaNode.GetReference().(string); got != "mydb.api" {
+			t.Fatalf("schema reference = %q, want %q", got, "mydb.api")
+		}
+	})
+}
+
+func TestSelectingSchemaNodeDoesNotOverwriteSelectedDatabase(t *testing.T) {
+	tree := NewTree("wanxiangos_staging", &schemaProgrammingMock{}, nil)
+	dbNode := tview.NewTreeNode("wanxiangos_staging")
+	dbNode.SetReference("wanxiangos_staging")
+	tree.GetRoot().AddChild(dbNode)
+
+	tree.buildSchemaTree("wanxiangos_staging", dbNode, map[string][]string{"deposit": {"deposit_orders"}}, nil, nil, nil)
+	tree.SetSelectedDatabase("wanxiangos_staging")
+
+	schemaNode := dbNode.GetChildren()[0]
+	if schemaNode.IsExpanded() {
+		t.Fatal("schemaNode should start collapsed")
+	}
+
+	tree.SetCurrentNode(schemaNode)
+	tree.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+
+	if got := tree.GetSelectedDatabase(); got != "wanxiangos_staging" {
+		t.Fatalf("selectedDatabase = %q, want %q", got, "wanxiangos_staging")
+	}
+	if !schemaNode.IsExpanded() {
+		t.Fatal("schemaNode should toggle to expanded when selected")
+	}
 }
